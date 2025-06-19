@@ -1,13 +1,13 @@
-from fastapi import FastAPI, Request, Form
+# main.py
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import stripe
 import os
 
 app = FastAPI()
 
-# Optional: Enable CORS for local testing or frontend integration
+# Enable CORS (optional, useful for frontend testing)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,17 +16,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve signup.html for GET requests to "/"
+# Stripe API Key from Render secret environment variable
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+YOUR_DOMAIN = "https://binstr-signup.onrender.com"
+
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    with open("signup.html", "r") as file:
-        return file.read()
+def home():
+    with open("signup.html", "r") as f:
+        return f.read()
 
-# Stripe setup
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")  # Set this in Render dashboard securely
-YOUR_DOMAIN = "https://binstr-signup.onrender.com"  # Replace with actual domain
+@app.get("/stripe-test")
+def test_stripe():
+    try:
+        balance = stripe.Balance.retrieve()
+        return {"success": True, "live": balance["livemode"]}
+    except Exception as e:
+        return {"error": str(e)}
 
-# Receive form data and redirect to Stripe Checkout
 @app.post("/signup")
 async def signup(
     name: str = Form(...),
@@ -35,10 +41,8 @@ async def signup(
     pickup_day: str = Form(...),
     referral: str = Form(None)
 ):
-    # Here, you'd log to a database or file
-    print("New signup:", name, address, phone, pickup_day, referral)
+    print("SIGNUP:", name, address, phone, pickup_day, referral)
 
-    # Create Stripe Checkout Session
     checkout_session = stripe.checkout.Session.create(
         payment_method_types=["card"],
         line_items=[{
@@ -46,13 +50,13 @@ async def signup(
                 "currency": "usd",
                 "product_data": {
                     "name": "Binstr Starter Plan",
-                    "description": "Quarterly billing for weekly bin service",
+                    "description": "Weekly bin service billed quarterly",
                 },
-                "unit_amount": 16200,  # $162 in cents
+                "unit_amount": 16200,
             },
             "quantity": 1,
         }],
-        mode="subscription",
+        mode="payment",
         success_url=f"{YOUR_DOMAIN}/?success=true",
         cancel_url=f"{YOUR_DOMAIN}/?canceled=true",
     )
