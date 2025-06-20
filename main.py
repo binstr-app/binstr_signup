@@ -16,8 +16,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Stripe API Key from Render secret environment variable
+import os
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
 YOUR_DOMAIN = "https://binstr-signup.onrender.com"
 
 @app.get("/", response_class=HTMLResponse)
