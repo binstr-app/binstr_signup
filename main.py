@@ -4,6 +4,8 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import stripe
 import os
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 app = FastAPI()
 
@@ -19,6 +21,12 @@ app.add_middleware(
 # Load Stripe secret key from environment
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 YOUR_DOMAIN = "https://binstr-signup.onrender.com"
+
+# Initialize Firebase once
+if not firebase_admin._apps:
+    cred = credentials.Certificate("firebase.json")
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -63,10 +71,9 @@ async def signup(
 
     return RedirectResponse(url=checkout_session.url, status_code=303)
 
-@app.get("/create-stripe-account")
-def create_stripe_account():
+@app.get("/create-stripe-account-link/{uid}")
+def create_stripe_account_link(uid: str):
     try:
-        # Create a standard connected account
         account = stripe.Account.create(
             type="standard",
             country="US",
@@ -76,7 +83,11 @@ def create_stripe_account():
             }
         )
 
-        # Generate the onboarding link
+        # Save account ID to Firestore under the correct user UID
+        db.collection("teens").document(uid).update({
+            "stripe_account_id": account.id
+        })
+
         account_link = stripe.AccountLink.create(
             account=account.id,
             refresh_url=f"{YOUR_DOMAIN}/onboarding-failed",
@@ -84,7 +95,7 @@ def create_stripe_account():
             type="account_onboarding"
         )
 
-        return JSONResponse(content={"url": account_link.url, "account_id": account.id})
+        return JSONResponse(content={"url": account_link.url})
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
