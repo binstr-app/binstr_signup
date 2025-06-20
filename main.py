@@ -1,13 +1,13 @@
 # main.py
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import stripe
 import os
 
 app = FastAPI()
 
-# Enable CORS (optional, useful for frontend testing)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,18 +16,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import os
+# Load Stripe secret key from environment
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-
 YOUR_DOMAIN = "https://binstr-signup.onrender.com"
 
 @app.get("/", response_class=HTMLResponse)
 def home():
     with open("signup.html", "r") as f:
         return f.read()
-@app.get("/env-check")
-def check_env():
-    return {"STRIPE_SECRET_KEY": os.getenv("STRIPE_SECRET_KEY")}
 
 @app.get("/stripe-test")
 def test_stripe():
@@ -66,3 +62,29 @@ async def signup(
     )
 
     return RedirectResponse(url=checkout_session.url, status_code=303)
+
+@app.get("/create-stripe-account")
+def create_stripe_account():
+    try:
+        # Create a standard connected account
+        account = stripe.Account.create(
+            type="standard",
+            country="US",
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True}
+            }
+        )
+
+        # Generate the onboarding link
+        account_link = stripe.AccountLink.create(
+            account=account.id,
+            refresh_url=f"{YOUR_DOMAIN}/onboarding-failed",
+            return_url=f"{YOUR_DOMAIN}/onboarding-complete",
+            type="account_onboarding"
+        )
+
+        return JSONResponse(content={"url": account_link.url, "account_id": account.id})
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
