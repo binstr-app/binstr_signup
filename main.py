@@ -25,6 +25,9 @@ YOUR_DOMAIN = "https://binstr-signup.onrender.com"
 def home():
     with open("signup.html", "r") as f:
         return f.read()
+@app.get("/env-check")
+def check_env():
+    return {"STRIPE_SECRET_KEY": os.getenv("STRIPE_SECRET_KEY")}
 
 @app.get("/stripe-test")
 def test_stripe():
