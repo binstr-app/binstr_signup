@@ -1,15 +1,15 @@
-# main.py
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import stripe
-import os
 import firebase_admin
 from firebase_admin import credentials, firestore
+import os
+import json
 
 app = FastAPI()
 
-# Enable CORS
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,28 +18,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Stripe secret key from environment
+# Stripe Setup
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 YOUR_DOMAIN = "https://binstr-signup.onrender.com"
 
-# Initialize Firebase once
+# ✅ Firebase Admin Init (Safe for Production)
 if not firebase_admin._apps:
-    cred = credentials.Certificate("firebase.json")
+    firebase_creds = os.getenv("FIREBASE_CREDENTIALS")
+    firebase_creds_dict = json.loads(firebase_creds)
+    cred = credentials.Certificate(firebase_creds_dict)
     firebase_admin.initialize_app(cred)
-    db = firestore.client()
 
+db = firestore.client()
+
+# Routes
 @app.get("/", response_class=HTMLResponse)
 def home():
     with open("signup.html", "r") as f:
         return f.read()
-
-@app.get("/stripe-test")
-def test_stripe():
-    try:
-        balance = stripe.Balance.retrieve()
-        return {"success": True, "live": balance["livemode"]}
-    except Exception as e:
-        return {"error": str(e)}
 
 @app.post("/signup")
 async def signup(
@@ -49,7 +45,15 @@ async def signup(
     pickup_day: str = Form(...),
     referral: str = Form(None)
 ):
-    print("SIGNUP:", name, address, phone, pickup_day, referral)
+    # Save to Firestore
+    doc_ref = db.collection("signups").document()
+    doc_ref.set({
+        "name": name,
+        "address": address,
+        "phone": phone,
+        "pickup_day": pickup_day,
+        "referral": referral,
+    })
 
     checkout_session = stripe.checkout.Session.create(
         payment_method_types=["card"],
@@ -72,7 +76,7 @@ async def signup(
     return RedirectResponse(url=checkout_session.url, status_code=303)
 
 @app.get("/create-stripe-account-link/{uid}")
-def create_stripe_account_link(uid: str):
+def create_stripe_account(uid: str):
     try:
         account = stripe.Account.create(
             type="standard",
@@ -82,20 +86,17 @@ def create_stripe_account_link(uid: str):
                 "transfers": {"requested": True}
             }
         )
-
-        # Save account ID to Firestore under the correct user UID
-        db.collection("teens").document(uid).update({
-            "stripe_account_id": account.id
-        })
-
-        account_link = stripe.AccountLink.create(
+        link = stripe.AccountLink.create(
             account=account.id,
             refresh_url=f"{YOUR_DOMAIN}/onboarding-failed",
             return_url=f"{YOUR_DOMAIN}/onboarding-complete",
             type="account_onboarding"
         )
-
-        return JSONResponse(content={"url": account_link.url})
-
+        # Save to Firestore
+        db.collection("stripe_accounts").document(uid).set({
+            "stripe_account_id": account.id,
+            "created_at": firestore.SERVER_TIMESTAMP
+        })
+        return JSONResponse(content={"url": link.url})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
